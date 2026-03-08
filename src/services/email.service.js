@@ -1,38 +1,31 @@
 import 'dotenv/config';
-import nodemailer from "nodemailer";
+import { Resend } from 'resend';
 
-export const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        type: "OAuth2",
-        user: process.env.EMAIL_USER,
-        clientId: process.env.CLIENT_ID,
-        clientSecret: process.env.CLIENT_SECRET,
-        refreshToken: process.env.REFRESH_TOKEN
-    }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-transporter.verify((error, success) => {
-    if (error) {
-        console.log("Error setting up email transporter: ", error);
-    }
-    else {
-        console.log("Email transporter is ready to send emails!!");
-    }
-});
-
-export const sendEmail = async(to, subject, text) =>{
+export const sendEmail = async (to, subject, text, html) => {
     try {
-        const info = await transporter.sendMail({
-            from: `"Banking App" <${process.env.EMAIL_USER}>`,
-            to,
-            subject,
-            text,
-            html
+        const data = await resend.emails.send({
+            from: `"Banking App" <onboarding@resend.dev>`,
+            to: [to],
+            subject: subject,
+            text: text,
+            html: html,
         });
-        console.log("Email sent successfully: %s", info.messageId);
-        console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info)); 
+
+        console.log("Email sent successfully!!: ", data);
     } catch (error) {
         console.log("Error sending email: ", error);
+        throw new Error("Failed to send email!!");
     }
-} 
+};
+
+export const sendRegistrationEmail = async (userEmail, userName) => {
+    const subject = "Welcome to Banking App!";
+
+    const text = `Hi ${userName},\n\nThank you for registering with our Banking App! We're excited to have you on board. If you have any questions or need assistance, feel free to reach out to our support team.\n\nBest regards,\nBanking App Team`;
+
+    const html = `<p>Hi ${userName},</p><p>Thank you for registering with our <strong>Banking App</strong>! We're excited to have you on board. If you have any questions or need assistance, feel free to reach out to our support team.</p><p>Best regards,<br/>Banking App Team</p>`;
+
+    await sendEmail(userEmail, subject, text, html);
+};
