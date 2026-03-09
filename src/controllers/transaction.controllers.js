@@ -2,7 +2,7 @@ import Transaction from "../models/transaction.model.js";
 import Account from "../models/account.model.js";
 import Ledger from "../models/ledger.model.js";
 import { sendTransactionEmail, sendTransactionFailureEmail } from "../services/email.service.js";
-import mongoose from "mongoose";
+import mongoose, { set } from "mongoose";
 
 export const createTransaction = async (req, res) => {
     try {
@@ -85,7 +85,7 @@ export const createTransaction = async (req, res) => {
             });
         }
 
-        //Drive sender balance form ledger
+        //Derive sender balance form ledger
         const balance = await fromUserAccount.getBalance();
         console.log("Current balance: ", balance);
 
@@ -96,36 +96,52 @@ export const createTransaction = async (req, res) => {
             });
         }
 
-        const session = await mongoose.startSession();
-        session.startTransaction();         //ater this point, all operations will be part of this transaction until we commit or abort
+        let transaction;
 
-        const transaction = new Transaction({
-            fromAccount,
-            toAccount,
-            amount,
-            idempotencyKey,
-            status: "PENDING"
-        });
+        try {
+            const session = await mongoose.startSession();
+            session.startTransaction();         //ater this point, all operations will be part of this transaction until we commit or abort
 
-        const debitLedgerEntry = await Ledger.create([{
-            account: fromAccount,
-            type: "DEBIT",
-            amount,
-            transaction: transaction._id
-        }], { session });
+            transaction = (await Transaction.create([{
+                fromAccount,
+                toAccount,
+                amount,
+                idempotencyKey,
+                status: "PENDING"
+            }], { session }))[0];  //when we create with session, it returns an array of created documents, so we take the first element of the array
 
-        const creditLedgerEntry = await Ledger.create([{
-            account: toAccount,
-            type: "CREDIT",
-            amount,
-            transaction: transaction._id
-        }], { session });
+            const debitLedgerEntry = await Ledger.create([{
+                account: fromAccount,
+                type: "DEBIT",
+                amount,
+                transaction: transaction._id
+            }], { session });
 
-        transaction.status = "COMPLETED";
-        await transaction.save({ session });
-        
-        await session.commitTransaction();  //if we reach this point, it means all operations were successful, so we can commit the transaction
-        session.endSession();
+            await (() => {
+                return new Promise((resolev) => setTimeout(resolev, 15 * 1000));
+            })();
+
+            const creditLedgerEntry = await Ledger.create([{
+                account: toAccount,
+                type: "CREDIT",
+                amount,
+                transaction: transaction._id
+            }], { session });
+
+            await transaction.findOneAndUpdate(
+                { _id: transaction._id },
+                { status: "COMPLETED" },
+                { session }
+            );
+
+            await session.commitTransaction();  //if we reach this point, it means all operations were successful, so we can commit the transaction
+            session.endSession();
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: "Transaction is pending due to some issue, Please try after some time!!"
+            });
+        }
 
         await sendTransactionEmail(req.user.email, req.user.name, amount, fromUserAccount.currency, toAccount);
 
@@ -146,7 +162,7 @@ export const createTransaction = async (req, res) => {
 
 
 export const createInitialFundsTransaction = async (req, res) => {
-    const {toAccount, amount, idempotencyKey} = req.body;
+    const { toAccount, amount, idempotencyKey } = req.body;
     console.log("ToAccount: ", toAccount);
     console.log("Amount: ", amount)
     console.log("idempotencyKeyI: ", idempotencyKey)
@@ -166,7 +182,7 @@ export const createInitialFundsTransaction = async (req, res) => {
     }
 
     try {
-        const toUserAccount = await Account.findOne({_id: toAccount});
+        const toUserAccount = await Account.findOne({ _id: toAccount });
 
         if (!toUserAccount) {
             return res.status(404).json({
@@ -175,9 +191,9 @@ export const createInitialFundsTransaction = async (req, res) => {
             });
         }
         console.log("ToUserAccount: ", toUserAccount)
-        const fromUserAccount = await Account.findOne({user: req.user._id});
+        const fromUserAccount = await Account.findOne({ user: req.user._id });
 
-        if(!fromUserAccount){
+        if (!fromUserAccount) {
             return res.status(404).json({
                 success: false,
                 message: "Invalid System account not found !!"
@@ -189,7 +205,7 @@ export const createInitialFundsTransaction = async (req, res) => {
 
         console.log("Session: ", session)
 
-        const transaction =  new Transaction({
+        const transaction = new Transaction({
             fromAccount: fromUserAccount._id,
             toAccount,
             amount,
@@ -198,13 +214,13 @@ export const createInitialFundsTransaction = async (req, res) => {
         });
 
         console.log("Transaction: ", transaction);
-//when we use session data is through an array of objects.
+        //when we use session data is through an array of objects.
         const debitLedgerEntry = await Ledger.create([{
             account: fromUserAccount._id,
             amount,
             transaction: transaction._id,
             type: "DEBIT"
-        }], {session});
+        }], { session });
 
         console.log("DebitLedgerEntry: ", debitLedgerEntry);
 
@@ -212,13 +228,13 @@ export const createInitialFundsTransaction = async (req, res) => {
             account: toAccount,
             amount,
             transaction: transaction._id,
-            type:"CREDIT"
-        }], {session});
+            type: "CREDIT"
+        }], { session });
 
         console.log("CreditLedgerEntry: ", creditLedgerEntry);
 
         transaction.status = "COMPLETED";
-        await transaction.save({session});
+        await transaction.save({ session });
 
         await session.commitTransaction();
         session.endSession();

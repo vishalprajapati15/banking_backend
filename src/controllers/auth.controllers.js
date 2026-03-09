@@ -1,6 +1,7 @@
 import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
 import { sendRegistrationEmail } from "../services/email.service.js";
+import TokenBlackList from "../models/blackList.model.js";
 
 export const userRegisterController = async (req, res) => {
     const { email, name, password } = req.body;;
@@ -96,4 +97,31 @@ export const userRegisterController = async (req, res) => {
         }
     });
 
+}
+
+export const userLogoutController = async (req, res) => {
+    try {
+        const token = req.cookies.token || req.header("Authorization")?.split(" ")[1];
+        if (!token) {
+            return res.status(400).json({
+                success: false,
+                message: "User Logged out successfuly!!"
+            });
+        }
+
+        res.clearCookie("token");
+
+        await TokenBlackList.create({ token });
+
+        return res.status(200).json({
+            success: true,
+            message: "User Logged out successfuly!!"
+        });
+        
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error!!"
+        });
+    }
 }

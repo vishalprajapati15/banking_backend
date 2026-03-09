@@ -1,5 +1,8 @@
 import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
+import TokenBlackList from "../models/blackList.model.js";
+
+
 
 export const authMiddleware = async (req, res, next) => {
     const token = req.cookies.token || req.header("Authorization")?.split(" ")[1];
@@ -11,6 +14,16 @@ export const authMiddleware = async (req, res, next) => {
     }
 
     try {
+
+        const isBlackListed = await TokenBlackList.findOne({ token });
+
+        if (isBlackListed) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized access, Please login to again!!"
+            });
+        }
+
         const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
 
         const user = await User.findById(decodedToken.userId);
@@ -31,14 +44,25 @@ export const authMiddleware = async (req, res, next) => {
 
 export const systemUserAuthMiddleware = async (req, res, next) => {
     const token = req.cookies.token || req.header("Authorization")?.split(" ")[1];
+
     if (!token) {
         return res.status(401).json({
             success: false,
-            message: "Unauthorized access, Please login to access this resource!!"
+            message: "Unauthorized access, Please login to again!!"
         });
     }
 
     try {
+
+        const isBlackListed = await TokenBlackList.findOne({ token });
+
+        if (isBlackListed) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized access, Please login to access this resource!!"
+            });
+        }
+
         const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decodedToken.userId).select("+systemUser");
 
