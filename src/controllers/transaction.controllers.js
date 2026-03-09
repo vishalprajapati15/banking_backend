@@ -1,4 +1,4 @@
-import Transaction from "../models/Transaction.js";
+import Transaction from "../models/transaction.model.js";
 import Account from "../models/account.model.js";
 import Ledger from "../models/ledger.model.js";
 import { sendTransactionEmail, sendTransactionFailureEmail } from "../services/email.service.js";
@@ -99,27 +99,27 @@ export const createTransaction = async (req, res) => {
         const session = await mongoose.startSession();
         session.startTransaction();         //ater this point, all operations will be part of this transaction until we commit or abort
 
-        const transaction = await Transaction.create({
+        const transaction = new Transaction({
             fromAccount,
             toAccount,
             amount,
             idempotencyKey,
             status: "PENDING"
-        }, { session });
+        });
 
-        const debitLedgerEntry = await Ledger.create({
+        const debitLedgerEntry = await Ledger.create([{
             account: fromAccount,
             type: "DEBIT",
             amount,
             transaction: transaction._id
-        }, { session });
+        }], { session });
 
-        const creditLedgerEntry = await Ledger.create({
+        const creditLedgerEntry = await Ledger.create([{
             account: toAccount,
             type: "CREDIT",
             amount,
             transaction: transaction._id
-        }, { session });
+        }], { session });
 
         transaction.status = "COMPLETED";
         await transaction.save({ session });
@@ -137,6 +137,101 @@ export const createTransaction = async (req, res) => {
 
     } catch (error) {
         await session.abortTransaction();  //if an error occurs, we abort the transaction
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error!!"
+        });
+    }
+}
+
+
+export const createInitialFundsTransaction = async (req, res) => {
+    const {toAccount, amount, idempotencyKey} = req.body;
+    console.log("ToAccount: ", toAccount);
+    console.log("Amount: ", amount)
+    console.log("idempotencyKeyI: ", idempotencyKey)
+
+    if (!toAccount || !amount || !idempotencyKey) {
+        return res.status(400).json({
+            success: false,
+            message: "ToAccount, Amount and IdempotencyKey are required!!"
+        });
+    }
+
+    if (amount <= 0) {
+        return res.status(400).json({
+            success: false,
+            message: "Amount must be greater than zero!!"
+        });
+    }
+
+    try {
+        const toUserAccount = await Account.findOne({_id: toAccount});
+
+        if (!toUserAccount) {
+            return res.status(404).json({
+                success: false,
+                message: "Invalid User account, not found!!"
+            });
+        }
+        console.log("ToUserAccount: ", toUserAccount)
+        const fromUserAccount = await Account.findOne({user: req.user._id});
+
+        if(!fromUserAccount){
+            return res.status(404).json({
+                success: false,
+                message: "Invalid System account not found !!"
+            });
+        }
+        console.log("FromUserAccount: ", fromUserAccount)
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        console.log("Session: ", session)
+
+        const transaction =  new Transaction({
+            fromAccount: fromUserAccount._id,
+            toAccount,
+            amount,
+            idempotencyKey,
+            status: "PENDING"
+        });
+
+        console.log("Transaction: ", transaction);
+//when we use session data is through an array of objects.
+        const debitLedgerEntry = await Ledger.create([{
+            account: fromUserAccount._id,
+            amount,
+            transaction: transaction._id,
+            type: "DEBIT"
+        }], {session});
+
+        console.log("DebitLedgerEntry: ", debitLedgerEntry);
+
+        const creditLedgerEntry = await Ledger.create([{
+            account: toAccount,
+            amount,
+            transaction: transaction._id,
+            type:"CREDIT"
+        }], {session});
+
+        console.log("CreditLedgerEntry: ", creditLedgerEntry);
+
+        transaction.status = "COMPLETED";
+        await transaction.save({session});
+
+        await session.commitTransaction();
+        session.endSession();
+
+        await sendTransactionEmail(req.user.email, req.user.name, amount, toUserAccount.currency, toAccount);
+
+        return res.status(201).json({
+            success: true,
+            message: "Initial funds added successfully!!",
+            transaction
+        });
+
+    } catch (error) {
         return res.status(500).json({
             success: false,
             message: "Internal server error!!"

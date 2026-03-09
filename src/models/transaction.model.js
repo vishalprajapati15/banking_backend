@@ -1,10 +1,10 @@
 import mongoose from "mongoose"; 
 
 const transactionSchema = new mongoose.Schema({
-    account:{
+    fromAccount:{
         type: mongoose.Schema.Types.ObjectId,
         ref: "Account",
-        required: [true, "Transaction must be associated with an account!!"],
+        required: [true, "Transaction must be associated with a sender account!!"],
         index: true
     },
     toAccount:{
